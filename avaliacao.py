@@ -1,86 +1,136 @@
-import contextlib
+
 import csv
-import io
-import math
 import statistics
 from collections import Counter, defaultdict
+from pathlib import Path
+
 from corpus_reader import CorpusReader
-from main import NUM_NOTAS
 from markov_chain import MarkovChain
+
 
 ORDENS = [1, 2, 3]
 SEEDS = range(100, 110)
+NUM_NOTAS = 256
 
 CAMPOS = [
-    "mem_4", "mem_8", "maior_trecho", "dist_altura",
-    "dist_intervalo", "fallbacks", "entropia", "deterministicos",
+    "mem_4",
+    "mem_8",
+    "maior_trecho",
+    "dist_altura",
+    "dist_intervalo",
+    "fallbacks",
+    "entropia",
+    "deterministicos",
 ]
 
-def gerar(corpus, ordem, seed):
-    markov = MarkovChain(seed, 0, ordem)
-    with contextlib.redirect_stdout(io.StringIO()):  # esconde o print do treino
-        markov.train(corpus)
 
-    notas = markov.gerar(corpus, NUM_NOTAS)
-    return notas, markov.fallbacks, markov.chain
+def ngramas(sequencia, n):
+    return [
+        tuple(sequencia[i:i + n])
+        for i in range(len(sequencia) - n + 1)
+    ]
 
-def ngramas(seq, n):
-    return [tuple(seq[i:i + n]) for i in range(len(seq) - n + 1)]
 
 def taxa_memorizacao(gerado, corpus, n):
-    # que fração dos n-gramas gerados já aparece no corpus
+    """Fração de n-gramas gerados encontrados no corpus."""
     conhecidos = set()
-    for seq in corpus:
-        conhecidos.update(ngramas(seq, n))
+
+    for sequencia in corpus:
+        conhecidos.update(ngramas(sequencia, n))
 
     gerados = ngramas(gerado, n)
-    achados = sum(g in conhecidos for g in gerados)
-    return achados / len(gerados)
 
-def maior_trecho_copiado(gerado, corpus):
-    # maior sequência de notas que a música copia de alguma voz do corpus
-    return max(trecho_comum(gerado, seq) for seq in corpus)
+    if not gerados:
+        return 0.0
 
-def trecho_comum(gerado, seq):
+    encontrados = sum(
+        grupo in conhecidos
+        for grupo in gerados
+    )
+
+    return encontrados / len(gerados)
+
+
+def trecho_comum(gerado, sequencia):
+    """Maior trecho consecutivo compartilhado entre duas sequências."""
     posicoes = defaultdict(list)
-    for j, nota in enumerate(seq):
-        posicoes[nota].append(j)
+
+    for indice, nota in enumerate(sequencia):
+        posicoes[nota].append(indice)
 
     melhor = 0
     anterior = {}
+
     for nota in gerado:
         atual = {}
-        for j in posicoes[nota]:
-            atual[j] = anterior.get(j - 1, 0) + 1
-        melhor = max(melhor, max(atual.values(), default=0))
+
+        for indice in posicoes[nota]:
+            atual[indice] = anterior.get(indice - 1, 0) + 1
+
+        melhor = max(
+            melhor,
+            max(atual.values(), default=0),
+        )
         anterior = atual
+
     return melhor
 
-def intervalos(seq):
-    return [b - a for a, b in zip(seq, seq[1:])]
 
-def distancia(a, b):
-    # distância de variação total entre as distribuições de a e b
-    ca, cb = Counter(a), Counter(b)
-    soma = 0
-    for k in set(ca) | set(cb):
-        soma += abs(ca[k] / len(a) - cb[k] / len(b))
+def maior_trecho_copiado(gerado, corpus):
+    if not corpus:
+        return 0
+
+    return max(
+        trecho_comum(gerado, sequencia)
+        for sequencia in corpus
+    )
+
+
+def intervalos(sequencia):
+    return [
+        b - a
+        for a, b in zip(sequencia, sequencia[1:])
+    ]
+
+
+def distancia_distribuicoes(a, b):
+    """Distância de variação total entre duas distribuições."""
+    if not a or not b:
+        return 0.0
+
+    ca = Counter(a)
+    cb = Counter(b)
+    soma = 0.0
+
+    for elemento in set(ca) | set(cb):
+        pa = ca[elemento] / len(a)
+        pb = cb[elemento] / len(b)
+        soma += abs(pa - pb)
+
     return 0.5 * soma
 
-def estatisticas_modelo(chain):
-    entropias = []
-    for trans in chain.values():
-        entropias.append(sum(p * math.log2(1 / p) for p in trans.values()))
-
-    deterministicos = sum(len(trans) == 1 for trans in chain.values())
-    return statistics.mean(entropias), deterministicos / len(chain)
 
 def avaliar(corpus, ordem, seed):
-    notas, fallbacks, chain = gerar(corpus, ordem, seed)
-    entropia, deterministicos = estatisticas_modelo(chain)
+    modelo = MarkovChain(ordem=ordem, seed=seed)
+    modelo.treinar(corpus)
 
-    todas_alturas = [n for seq in corpus for n in seq]
-    todos_intervalos = [i for seq in corpus for i in intervalos(seq)]
+    notas, fallbacks = modelo.gerar_com_estatisticas(
+        n_notas=NUM_NOTAS,
+        temperatura=1.0,
+        evitar_repeticao=True,
+    )
+
+    todas_alturas = [
+        nota
+        for sequencia in corpus
+        for nota in sequencia
+    ]
+
+    todos_intervalos = [
+        intervalo
+        for sequencia in corpus
+        for intervalo in intervalos(sequencia)
+    ]
 
     return {
         "ordem": ordem,
@@ -88,41 +138,85 @@ def avaliar(corpus, ordem, seed):
         "mem_4": taxa_memorizacao(notas, corpus, 4),
         "mem_8": taxa_memorizacao(notas, corpus, 8),
         "maior_trecho": maior_trecho_copiado(notas, corpus),
-        "dist_altura": distancia(notas, todas_alturas),
-        "dist_intervalo": distancia(intervalos(notas), todos_intervalos),
+        "dist_altura": distancia_distribuicoes(
+            notas, todas_alturas
+        ),
+        "dist_intervalo": distancia_distribuicoes(
+            intervalos(notas), todos_intervalos
+        ),
         "fallbacks": fallbacks,
-        "entropia": entropia,
-        "deterministicos": deterministicos,
+        "entropia": modelo.entropia_media(),
+        "deterministicos": (
+            modelo.proporcao_contextos_deterministicos()
+        ),
+        "notas_distintas": len(set(notas)),
     }
 
+
 def imprimir_tabela(linhas):
-    print(f"\nMédias de {len(SEEDS)} seeds por ordem\n")
-    print("ordem  " + "  ".join(f"{c:>15}" for c in CAMPOS))
+    campos = CAMPOS + ["notas_distintas"]
+
+    print(f"\nMédias por ordem, com {len(SEEDS)} sementes\n")
+    print(
+        f"{'ordem':>5}  "
+        + "  ".join(f"{campo:>16}" for campo in campos)
+    )
 
     for ordem in ORDENS:
-        grupo = [l for l in linhas if l["ordem"] == ordem]
-        medias = "  ".join(
-            f"{statistics.mean(l[c] for l in grupo):15.2f}" for c in CAMPOS
-        )
-        print(f"{ordem:5}  {medias}")
+        grupo = [
+            linha for linha in linhas
+            if linha["ordem"] == ordem
+        ]
 
-def salvar_csv(linhas, caminho="resultados_avaliacao.csv"):
-    with open(caminho, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(linhas[0]))
-        writer.writeheader()
-        writer.writerows(linhas)
-    print(f"\nResultados por seed salvos em {caminho}")
+        if not grupo:
+            continue
+
+        medias = [
+            f"{statistics.mean(linha[c] for linha in grupo):16.3f}"
+            for c in campos
+        ]
+
+        print(f"{ordem:5}  " + "  ".join(medias))
+
+
+def salvar_csv(linhas, caminho):
+    if not linhas:
+        print("Nenhum resultado para salvar.")
+        return
+
+    with open(
+        caminho,
+        "w",
+        newline="",
+        encoding="utf-8",
+    ) as arquivo:
+        escritor = csv.DictWriter(
+            arquivo,
+            fieldnames=list(linhas[0].keys()),
+        )
+        escritor.writeheader()
+        escritor.writerows(linhas)
+
+    print(f"\nResultados individuais salvos em: {caminho}")
+
 
 def main():
-    corpus = CorpusReader("corpus").read_corpus()
-
+    corpus = CorpusReader("corpus").carregar_corpus()
     linhas = []
+
     for ordem in ORDENS:
         for seed in SEEDS:
-            linhas.append(avaliar(corpus, ordem, seed))
+            print(f"Avaliando ordem={ordem}, seed={seed}...")
+
+            linhas.append(
+                avaliar(corpus, ordem, seed)
+            )
 
     imprimir_tabela(linhas)
-    salvar_csv(linhas)
+
+    caminho = Path("resultados_avaliacao.csv")
+    salvar_csv(linhas, caminho)
+
 
 if __name__ == "__main__":
     main()

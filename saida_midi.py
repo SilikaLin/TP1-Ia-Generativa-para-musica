@@ -1,51 +1,164 @@
+
+import math
 import shutil
 import subprocess
 from pathlib import Path
-from music21 import stream, note, tempo
 
-BPM = 120  # 500 ms por semínima
+from music21 import (
+    stream,
+    note,
+    instrument,
+    tempo,
+    meter,
+)
 
-def salvar_midi(notas, filename, delay):
-    # grava as notas num .mid, cada uma durando delay ms
-    score = stream.Stream()
-    score.append(tempo.MetronomeMark(number=BPM))
 
-    quarter_length = delay / (60000 / BPM)
+def salvar_midi(
+    melodia,
+    caminho,
+    duracoes=None,
+    bpm=120,
+    perfil="aventura",
+    incluir_acompanhamento=True,
+):
+    """Salva a melodia em MIDI com ritmo e acompanhamento opcionais."""
+    caminho = Path(caminho)
+    caminho.parent.mkdir(parents=True, exist_ok=True)
 
-    for midi_note in notas:
-        pitch = max(0, min(127, int(midi_note)))
-        nova_nota = note.Note(pitch)
-        nova_nota.quarterLength = quarter_length
-        score.append(nova_nota)
+    if not melodia:
+        raise ValueError("A melodia não pode estar vazia.")
 
-    score.write("midi", fp=str(filename))
-    print(f"MIDI criado: {filename}")
+    if bpm <= 0:
+        raise ValueError("O BPM precisa ser positivo.")
 
-def midi_para_wav(midi_file, wav_file, soundfont):
-    # converte o .mid em .wav com o FluidSynth
-    if shutil.which("fluidsynth") is None:
-        print("FluidSynth não encontrado, pulando o WAV.")
-        return False
+    if duracoes is None:
+        duracoes = [0.5] * len(melodia)
 
-    if not Path(soundfont).exists():
-        print(f"Soundfont '{soundfont}' não encontrado, pulando o WAV.")
-        return False
+    if len(duracoes) != len(melodia):
+        raise ValueError(
+            "A quantidade de durações deve corresponder às notas."
+        )
+
+    if any(float(d) <= 0 for d in duracoes):
+        raise ValueError("Todas as durações precisam ser positivas.")
+
+    score = stream.Score()
+    score.insert(0, tempo.MetronomeMark(number=bpm))
+    score.insert(0, meter.TimeSignature("4/4"))
+
+    # Melodia principal.
+    linha = stream.Part()
+    linha.insert(0, instrument.Flute())
+    posicao = 0.0
+
+    for altura, duracao in zip(melodia, duracoes):
+        altura = int(altura)
+
+        if not 0 <= altura <= 127:
+            raise ValueError(f"Altura MIDI fora do intervalo: {altura}")
+
+        nova_nota = note.Note(altura)
+        nova_nota.quarterLength = float(duracao)
+        linha.insert(posicao, nova_nota)
+        posicao += float(duracao)
+
+    score.insert(0, linha)
+
+    # Acompanhamento de baixo.
+    if incluir_acompanhamento:
+        baixo = stream.Part()
+        baixo.insert(0, instrument.AcousticBass())
+
+        raiz = _estimar_raiz(melodia)
+        progressao = _progressao(perfil)
+        compassos = max(1, math.ceil(posicao / 4.0))
+
+        for compasso in range(compassos):
+            grau = progressao[compasso % len(progressao)]
+            altura = raiz + grau - 12
+
+            while altura < 36:
+                altura += 12
+
+            while altura > 55:
+                altura -= 12
+
+            inicio = compasso * 4.0
+            duracao = min(4.0, posicao - inicio)
+
+            if duracao <= 0:
+                continue
+
+            nota_baixo = note.Note(altura)
+            nota_baixo.quarterLength = duracao
+            baixo.insert(inicio, nota_baixo)
+
+        score.insert(0, baixo)
+
+    score.write("midi", fp=str(caminho))
+    return caminho
+
+
+def _estimar_raiz(melodia):
+    """Estima uma classe de altura pela frequência no material gerado."""
+    contagens = [0] * 12
+
+    for altura in melodia:
+        contagens[int(altura) % 12] += 1
+
+    classe = max(range(12), key=lambda i: contagens[i])
+    return 48 + classe
+
+
+def _progressao(perfil):
+    """Progressões simples definidas manualmente por perfil."""
+    perfis = {
+        "aventura": [0, 7, 9, 5],
+        "suspense": [0, 3, 6, 7],
+        "exploracao": [0, 5, 7, 0],
+        "arcade": [0, 5, 3, 7],
+    }
+
+    return perfis.get(perfil, perfis["aventura"])
+
+
+def midi_para_wav(
+    caminho_midi,
+    caminho_wav,
+    soundfont="soundfont.sf2",
+):
+    """Converte MIDI para WAV usando o programa FluidSynth."""
+    midi = Path(caminho_midi)
+    wav = Path(caminho_wav)
+    fonte = Path(soundfont)
+
+    if not midi.exists():
+        raise FileNotFoundError(f"MIDI não encontrado: {midi}")
+
+    if not fonte.exists():
+        raise FileNotFoundError(
+            f"SoundFont não encontrada: {fonte}"
+        )
+
+    fluidsynth = shutil.which("fluidsynth")
+
+    if fluidsynth is None:
+        raise FileNotFoundError(
+            "FluidSynth não está instalado ou não está no PATH."
+        )
+
+    wav.parent.mkdir(parents=True, exist_ok=True)
 
     comando = [
-        "fluidsynth", "-ni",
-        "-g", "1",           # o ganho padrão (0.2) deixa o WAV baixo demais
+        fluidsynth,
+        "-ni",
+        "-g", "1",
         "-r", "44100",
-        "-T", "wav",
-        "-F", str(wav_file),
-        str(soundfont),
-        str(midi_file),
+        "-F", str(wav),
+        str(fonte),
+        str(midi),
     ]
 
-    try:
-        subprocess.run(comando, check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as erro:
-        print(f"FluidSynth falhou em {midi_file}:\n{erro.stderr}")
-        return False
+    subprocess.run(comando, check=True, capture_output=True, text=True)
 
-    print(f"WAV criado: {wav_file}")
-    return True
+    return wav

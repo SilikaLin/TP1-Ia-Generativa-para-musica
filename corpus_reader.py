@@ -1,89 +1,143 @@
-import statistics
-import struct
-from collections import defaultdict
 from pathlib import Path
-from leitor_midi import ler_midi, extrair_notas
+from music21 import converter, note, chord
 
-CANAL_BATERIA = 9  # canal 10 do General MIDI (percussão)
 
 class CorpusReader:
+    """Lê arquivos MIDI e extrai sequências monofônicas de alturas."""
 
-    MIN_NOTAS = 30    # menos que isso é efeito sonoro ou enfeite
-    MIN_ALTURAS = 5   # menos que isso é basicamente uma nota repetida
-
-    def __init__(self, corpus_folder="corpus", registro_minimo=60):
-        self.corpus_folder = Path(corpus_folder)
+    def __init__(
+        self,
+        pasta="corpus",
+        minimo_notas=30,
+        minimo_alturas=5,
+        registro_minimo=60,
+    ):
+        self.pasta = Path(pasta)
+        self.minimo_notas = minimo_notas
+        self.minimo_alturas = minimo_alturas
         self.registro_minimo = registro_minimo
 
-    def get_midi_files(self):
-        if not self.corpus_folder.exists():
-            raise FileNotFoundError(f"A pasta '{self.corpus_folder}' não existe.")
-
-        files = list(self.corpus_folder.glob("*.mid"))
-        files += self.corpus_folder.glob("*.midi")
-        return sorted(files)
-
-    def linha_mais_aguda(self, notas):
-        # acorde (várias notas no mesmo início): fica só a mais aguda
-        mais_aguda = {}
-        for inicio, _, altura, _ in notas:
-            mais_aguda[inicio] = max(altura, mais_aguda.get(inicio, 0))
-        return [mais_aguda[inicio] for inicio in sorted(mais_aguda)]
-
-    def voz_serve(self, sequencia):
-        if len(sequencia) < self.MIN_NOTAS:
-            return False
-        if len(set(sequencia)) < self.MIN_ALTURAS:
-            return False
-        return statistics.mean(sequencia) >= self.registro_minimo
-
-    def read_file(self, filepath):
-        # uma sequência de alturas por voz (trilha + canal), sem a bateria
-        _, _, trilhas = ler_midi(filepath)
-        sequencias = []
-
-        for trilha in trilhas:
-            por_canal = defaultdict(list)
-            for ev in trilha:
-                if ev["tipo"] in ("note_on", "note_off") and ev["canal"] != CANAL_BATERIA:
-                    por_canal[ev["canal"]].append(ev)
-
-            for eventos in por_canal.values():
-                sequencia = self.linha_mais_aguda(extrair_notas([eventos]))
-                if self.voz_serve(sequencia):
-                    sequencias.append(sequencia)
-
-        return sequencias
-
-    def read_corpus(self):
-        midi_files = self.get_midi_files()
-
-        if not midi_files:
+    def carregar_corpus(self):
+        if not self.pasta.exists():
             raise FileNotFoundError(
-                f"Nenhum .mid ou .midi na pasta '{self.corpus_folder}'."
+                f"A pasta '{self.pasta}' não existe."
             )
 
-        corpus = []
-        vistas = set()  # tem MIDI que dobra a melodia, aí as vozes ficam iguais
+        arquivos = sorted(
+            list(self.pasta.glob("*.mid"))
+            + list(self.pasta.glob("*.midi"))
+        )
 
-        for filepath in midi_files:
+        if not arquivos:
+            raise FileNotFoundError(
+                f"Nenhum MIDI encontrado em '{self.pasta}'."
+            )
+
+        sequencias = []
+        vistas = set()
+        descartados = 0
+
+        for arquivo in arquivos:
             try:
-                vozes = self.read_file(filepath)
-            except (ValueError, IndexError, KeyError, struct.error) as erro:
-                print(f"Ignorando {filepath.name}: {erro!r}")
-                continue
+                score = converter.parse(str(arquivo))
+                eventos = []
 
-            novas = []
-            for voz in vozes:
-                if tuple(voz) not in vistas:
-                    vistas.add(tuple(voz))
-                    novas.append(voz)
+                # Os offsets são medidos em tempos musicais.
+                for elemento in score.flatten().notes:
+                    inicio = float(elemento.offset)
 
-            print(f"Lendo {filepath.name}: {len(novas)} vozes, {sum(map(len, novas))} notas")
-            corpus.extend(novas)
+                    if isinstance(elemento, note.Note):
+                        altura = elemento.pitch.midi
+                    elif isinstance(elemento, chord.Chord):
+                        altura = max(
+                            p.midi for p in elemento.pitches
+                        )
+                    else:
+                        continue
 
-        if not corpus:
-            raise ValueError("Nenhuma voz aproveitável nos MIDIs da pasta.")
+                    eventos.append((inicio, altura))
 
-        print(f"Total no corpus: {len(corpus)} vozes, {sum(map(len, corpus))} notas")
-        return corpus
+                por_inicio = {}
+
+                for inicio, altura in eventos:
+                    chave = round(inicio, 4)
+                    por_inicio[chave] = max(
+                        altura,
+                        por_inicio.get(chave, altura),
+                    )
+
+                sequencia = [
+                    altura
+                    for _, altura in sorted(por_inicio.items())
+                ]
+
+                if len(sequencia) < self.minimo_notas:
+                    descartados += 1
+                    print(
+                        f"[filtro] {arquivo.name}: poucas notas "
+                        f"({len(sequencia)})."
+                    )
+                    continue
+
+                if len(set(sequencia)) < self.minimo_alturas:
+                    descartados += 1
+                    print(
+                        f"[filtro] {arquivo.name}: poucas alturas distintas."
+                    )
+                    continue
+
+                if (
+                    self.registro_minimo is not None
+                    and sum(sequencia) / len(sequencia)
+                    < self.registro_minimo
+                ):
+                    descartados += 1
+                    print(
+                        f"[filtro] {arquivo.name}: registro médio baixo."
+                    )
+                    continue
+
+                chave = tuple(sequencia)
+
+                if chave in vistas:
+                    descartados += 1
+                    print(
+                        f"[filtro] {arquivo.name}: sequência duplicada."
+                    )
+                    continue
+
+                vistas.add(chave)
+                sequencias.append(sequencia)
+
+                print(
+                    f"[ok] {arquivo.name}: {len(sequencia)} notas, "
+                    f"{len(set(sequencia))} alturas distintas."
+                )
+
+            except Exception as erro:
+                descartados += 1
+                print(
+                    f"[aviso] Não foi possível ler {arquivo.name}: {erro}"
+                )
+
+        if not sequencias:
+            raise ValueError(
+                "Nenhuma sequência adequada foi encontrada. "
+                "Confira os MIDI ou ajuste os filtros."
+            )
+
+        total_notas = sum(len(seq) for seq in sequencias)
+        total_alturas = len({
+            altura
+            for seq in sequencias
+            for altura in seq
+        })
+
+        print("\nResumo do corpus")
+        print(f"Arquivos encontrados: {len(arquivos)}")
+        print(f"Sequências aproveitadas: {len(sequencias)}")
+        print(f"Arquivos ou sequências descartados: {descartados}")
+        print(f"Total de notas: {total_notas}")
+        print(f"Alturas MIDI distintas: {total_alturas}")
+
+        return sequencias
