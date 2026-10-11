@@ -73,13 +73,6 @@ Gerar uma música mais curta:
 python main.py --ordem 2 --notas 128 --seed 200 --sem-wav
 ```
 
-Gerar sem acompanhamento:
-
-```bash
-python main.py --ordem 2 --perfil exploracao --seed 300 \
-  --sem-acompanhamento --sem-wav
-```
-
 ## Perfis disponíveis
 
 - `aventura`
