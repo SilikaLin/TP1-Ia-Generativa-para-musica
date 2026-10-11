@@ -1,9 +1,8 @@
 from pathlib import Path
 from music21 import converter, note, chord
 
-
 class CorpusReader:
-    """Lê arquivos MIDI e extrai sequências monofônicas de alturas."""
+    # Lê arquivos MIDI e extrai sequências monofônicas de alturas.
 
     def __init__(
         self,

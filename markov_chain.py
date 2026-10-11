@@ -1,11 +1,9 @@
-
 from collections import Counter, defaultdict
 import math
 import random
 
-
 class MarkovChain:
-    """Modelo de Markov para gerar melodias a partir de um corpus."""
+    # Modelo de Markov para gerar melodias a partir de um corpus.
 
     def __init__(self, ordem=2, seed=None):
         if ordem < 1:
@@ -18,7 +16,7 @@ class MarkovChain:
         self.notas_corpus = []
 
     def treinar(self, sequencias):
-        """Conta as transições observadas em cada sequência."""
+        # Conta as transições observadas em cada sequência.
         self.transicoes.clear()
         self.contextos.clear()
         self.notas_corpus = []
@@ -50,7 +48,7 @@ class MarkovChain:
         )
 
     def _escolher_ponderado(self, pesos):
-        """Escolhe uma nota proporcionalmente ao seu peso."""
+        # Escolhe uma nota proporcionalmente ao seu peso.
         itens = list(pesos.items())
         total = sum(peso for _, peso in itens)
 
@@ -122,7 +120,7 @@ class MarkovChain:
         temperatura=1.0,
         evitar_repeticao=True,
     ):
-        """Gera uma sequência de alturas MIDI."""
+        # Gera uma sequência de alturas MIDI.
         notas, _ = self._gerar(
             n_notas,
             temperatura,
@@ -136,7 +134,7 @@ class MarkovChain:
         temperatura=1.0,
         evitar_repeticao=True,
     ):
-        """Gera notas e informa quantos fallbacks ocorreram."""
+        # Gera notas e informa quantos fallbacks ocorreram.
         return self._gerar(
             n_notas,
             temperatura,
@@ -144,7 +142,7 @@ class MarkovChain:
         )
 
     def probabilidades(self, contexto):
-        """Retorna as probabilidades aprendidas para um contexto."""
+        # Retorna as probabilidades aprendidas para um contexto.
         contexto = tuple(contexto)
         contagens = self.transicoes.get(contexto)
 
@@ -159,7 +157,7 @@ class MarkovChain:
         }
 
     def entropia_media(self):
-        """Calcula a entropia média das distribuições de transição."""
+        # Calcula a entropia média das distribuições de transição.
         if not self.transicoes:
             return 0.0
 
@@ -178,7 +176,7 @@ class MarkovChain:
         return sum(entropias) / len(entropias)
 
     def proporcao_contextos_deterministicos(self):
-        """Proporção de contextos com apenas uma próxima nota possível."""
+        # Proporção de contextos com apenas uma próxima nota possível.
         if not self.transicoes:
             return 0.0
 

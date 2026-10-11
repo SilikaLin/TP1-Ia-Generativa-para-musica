@@ -1,4 +1,3 @@
-
 import math
 import shutil
 import subprocess
@@ -12,7 +11,6 @@ from music21 import (
     meter,
 )
 
-
 def salvar_midi(
     melodia,
     caminho,
@@ -21,7 +19,7 @@ def salvar_midi(
     perfil="aventura",
     incluir_acompanhamento=True,
 ):
-    """Salva a melodia em MIDI com ritmo e acompanhamento opcionais."""
+    # Salva a melodia em MIDI com ritmo e acompanhamento opcionais.
     caminho = Path(caminho)
     caminho.parent.mkdir(parents=True, exist_ok=True)
 
@@ -100,7 +98,7 @@ def salvar_midi(
 
 
 def _estimar_raiz(melodia):
-    """Estima uma classe de altura pela frequência no material gerado."""
+    # Estima uma classe de altura pela frequência no material gerado.
     contagens = [0] * 12
 
     for altura in melodia:
@@ -111,7 +109,7 @@ def _estimar_raiz(melodia):
 
 
 def _progressao(perfil):
-    """Progressões simples definidas manualmente por perfil."""
+    # Progressões simples definidas manualmente por perfil.
     perfis = {
         "aventura": [0, 7, 9, 5],
         "suspense": [0, 3, 6, 7],
@@ -127,7 +125,7 @@ def midi_para_wav(
     caminho_wav,
     soundfont="soundfont.sf2",
 ):
-    """Converte MIDI para WAV usando o programa FluidSynth."""
+    # Converte MIDI para WAV usando o programa FluidSynth.
     midi = Path(caminho_midi)
     wav = Path(caminho_wav)
     fonte = Path(soundfont)

@@ -105,5 +105,5 @@ def extrair_notas(trilhas):
             elif chave in abertas:
                 inicio, velocity_inicial = abertas.pop(chave)
                 notas.append((inicio, ev["tick"], nota, velocity_inicial))
-
+    
     return notas

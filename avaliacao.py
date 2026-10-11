@@ -1,12 +1,9 @@
-
 import csv
 import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
-
 from corpus_reader import CorpusReader
 from markov_chain import MarkovChain
-
 
 ORDENS = [1, 2, 3]
 SEEDS = range(100, 110)
@@ -23,16 +20,14 @@ CAMPOS = [
     "deterministicos",
 ]
 
-
 def ngramas(sequencia, n):
     return [
         tuple(sequencia[i:i + n])
         for i in range(len(sequencia) - n + 1)
     ]
 
-
 def taxa_memorizacao(gerado, corpus, n):
-    """Fração de n-gramas gerados encontrados no corpus."""
+    # Fração de n-gramas gerados encontrados no corpus.
     conhecidos = set()
 
     for sequencia in corpus:
@@ -50,9 +45,8 @@ def taxa_memorizacao(gerado, corpus, n):
 
     return encontrados / len(gerados)
 
-
 def trecho_comum(gerado, sequencia):
-    """Maior trecho consecutivo compartilhado entre duas sequências."""
+    # Maior trecho consecutivo compartilhado entre duas sequências.
     posicoes = defaultdict(list)
 
     for indice, nota in enumerate(sequencia):
@@ -75,7 +69,6 @@ def trecho_comum(gerado, sequencia):
 
     return melhor
 
-
 def maior_trecho_copiado(gerado, corpus):
     if not corpus:
         return 0
@@ -85,16 +78,14 @@ def maior_trecho_copiado(gerado, corpus):
         for sequencia in corpus
     )
 
-
 def intervalos(sequencia):
     return [
         b - a
         for a, b in zip(sequencia, sequencia[1:])
     ]
 
-
 def distancia_distribuicoes(a, b):
-    """Distância de variação total entre duas distribuições."""
+    # Distância de variação total entre duas distribuições.
     if not a or not b:
         return 0.0
 
@@ -108,7 +99,6 @@ def distancia_distribuicoes(a, b):
         soma += abs(pa - pb)
 
     return 0.5 * soma
-
 
 def avaliar(corpus, ordem, seed):
     modelo = MarkovChain(ordem=ordem, seed=seed)
@@ -138,20 +128,13 @@ def avaliar(corpus, ordem, seed):
         "mem_4": taxa_memorizacao(notas, corpus, 4),
         "mem_8": taxa_memorizacao(notas, corpus, 8),
         "maior_trecho": maior_trecho_copiado(notas, corpus),
-        "dist_altura": distancia_distribuicoes(
-            notas, todas_alturas
-        ),
-        "dist_intervalo": distancia_distribuicoes(
-            intervalos(notas), todos_intervalos
-        ),
+        "dist_altura": distancia_distribuicoes(notas, todas_alturas),
+        "dist_intervalo": distancia_distribuicoes(intervalos(notas), todos_intervalos),
         "fallbacks": fallbacks,
         "entropia": modelo.entropia_media(),
-        "deterministicos": (
-            modelo.proporcao_contextos_deterministicos()
-        ),
+        "deterministicos": (modelo.proporcao_contextos_deterministicos()),
         "notas_distintas": len(set(notas)),
     }
-
 
 def imprimir_tabela(linhas):
     campos = CAMPOS + ["notas_distintas"]
@@ -177,7 +160,6 @@ def imprimir_tabela(linhas):
         ]
 
         print(f"{ordem:5}  " + "  ".join(medias))
-
 
 def salvar_csv(linhas, caminho):
     if not linhas:
@@ -216,7 +198,6 @@ def main():
 
     caminho = Path("resultados_avaliacao.csv")
     salvar_csv(linhas, caminho)
-
 
 if __name__ == "__main__":
     main()
